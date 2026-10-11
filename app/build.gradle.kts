@@ -143,7 +143,7 @@ dependencies {
     // LSPosed (libxposed modern API). The API is provided by the framework at runtime, so it is
     // compile-only; the service library is how the app talks to LSPosed (scope, remote prefs).
     compileOnly("io.github.libxposed:api:102.0.0")
-    implementation("io.github.libxposed:service:101.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
     testImplementation("io.github.libxposed:api:102.0.0")
 
     testImplementation("junit:junit:4.13.2")
