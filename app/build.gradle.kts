@@ -138,7 +138,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.compose.material:material-icons-core")
-    implementation("androidx.work:work-runtime:2.11.2")
+    implementation("androidx.work:work-runtime:2.12.0")
 
     // LSPosed (libxposed modern API). The API is provided by the framework at runtime, so it is
     // compile-only; the service library is how the app talks to LSPosed (scope, remote prefs).
