@@ -101,18 +101,65 @@ final class ImeSession implements BridgeClient.Listener {
     }
 
     // =========================================================================================
+    // Debug log (only while the app's "Debug log" switch is on; shown in SwiftSlate > Settings)
+    // =========================================================================================
+
+    private long rateLogAt;
+    private String rateLogKey;
+
+    private void dlog(String msg) {
+        TriggerSnapshot s = snapshot;
+        if (s == null || !s.debug) return;
+        Log.i(TAG, msg);
+        Bundle b = new Bundle();
+        b.putString(BridgeProtocol.K_TOKEN, s.token);
+        b.putString(BridgeProtocol.K_TEXT, msg);
+        bridge.send(BridgeProtocol.MSG_LOG, b);
+    }
+
+    /** Same line is logged at most once per 1.5 s (keystroke bursts, repeated events). */
+    private void dlogRated(String msg) {
+        long now = SystemClock.uptimeMillis();
+        if (msg.equals(rateLogKey) && now - rateLogAt < 1500L) return;
+        rateLogKey = msg;
+        rateLogAt = now;
+        dlog(msg);
+    }
+
+    /** Last n chars, printable ASCII as is, everything else as a backslash-u escape. */
+    private static String tail(CharSequence t, int n) {
+        if (t == null) return "null";
+        int from = Math.max(0, t.length() - n);
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c == '\n') sb.append('\\').append('n');
+            else if (c >= 32 && c < 127) sb.append(c);
+            else sb.append('\\').append('u').append(String.format("%04x", (int) c));
+        }
+        return sb.toString();
+    }
+
+    // =========================================================================================
     // Trigger detection
     // =========================================================================================
 
     void onSelectionUpdate(int newSelStart, int newSelEnd) {
         selectionCollapsed = newSelStart == newSelEnd;
-        if (!selectionCollapsed) return;
+        if (!selectionCollapsed) {
+            dlogRated("selection update ignored: text is selected (" + newSelStart + ".." + newSelEnd + ")");
+            return;
+        }
         if (!busy) {
             try {
-                detect();
+                detect("sel");
             } catch (Throwable t) {
                 Log.w(TAG, "selection handling failed", t);
+                dlog("detect crashed: " + t);
             }
+        } else {
+            dlogRated("selection update ignored: request " + currentId + " still running (spinner="
+                    + spinnerOn + ", gotReply=" + gotReply + ")");
         }
         // Also covers a request that is still running: see retriggerIfEdited().
         scheduleRecheck();
@@ -125,7 +172,7 @@ final class ImeSession implements BridgeClient.Listener {
                 recheck = null;
                 if (!selectionCollapsed) return;
                 try {
-                    if (busy) retriggerIfEdited(); else detect();
+                    if (busy) retriggerIfEdited(); else detect("recheck");
                 } catch (Throwable t) {
                     Log.w(TAG, "recheck failed", t);
                 }
@@ -150,9 +197,10 @@ final class ImeSession implements BridgeClient.Listener {
         if (text.endsWith(exp)) return; // untouched: keep waiting for the result
         TriggerSnapshot snap = currentSnapshot();
         if (snap == null || snap.match(text) == null) return;
-        Log.i(TAG, "new trigger typed while request " + currentId + " was running; superseding it");
+        dlog("SUPERSEDE: new trigger typed while request " + currentId + " was running; tail='"
+                + tail(text, 16) + "'");
         cancelInFlight();
-        detect();
+        detect("retrigger");
     }
 
     private void cancelInFlight() {
@@ -167,7 +215,7 @@ final class ImeSession implements BridgeClient.Listener {
         finish();
     }
 
-    private void detect() {
+    private void detect(String src) {
         EditorInfo ei = ims.getCurrentInputEditorInfo();
         InputConnection ic = ims.getCurrentInputConnection();
         if (ei == null || ic == null) return;
@@ -175,7 +223,10 @@ final class ImeSession implements BridgeClient.Listener {
         if (isPasswordField(ei.inputType)) return;
 
         TriggerSnapshot snap = currentSnapshot();
-        if (snap == null) return;
+        if (snap == null) {
+            dlogRated("detect[" + src + "]: no trigger snapshot (open SwiftSlate once, restart keyboard)");
+            return;
+        }
 
         CharSequence before = ic.getTextBeforeCursor(MAX_CHARS, 0);
         if (before == null || before.length() == 0) return;
@@ -183,15 +234,29 @@ final class ImeSession implements BridgeClient.Listener {
 
         if (lastWritten != null && text.equals(lastWritten)
                 && SystemClock.uptimeMillis() - lastWrittenAt < ECHO_SUPPRESS_MS) {
+            dlogRated("detect[" + src + "]: echo of our own write ignored");
             return;
         }
 
         TriggerSnapshot.Match match = snap.match(text);
-        if (match == null) return;
+        if (match == null) {
+            if (snap.debug) {
+                int at = text.lastIndexOf(snap.prefix);
+                if (at >= 0 && at >= text.length() - 16) {
+                    dlogRated("detect[" + src + "]: no match, tail='" + tail(text, 16) + "' len="
+                            + text.length() + " prefix='" + snap.prefix + "'");
+                }
+            }
+            return;
+        }
 
         // The original service only fired when the whole field ended with the trigger.
         CharSequence after = ic.getTextAfterCursor(1, 0);
-        if (after != null && after.length() > 0) return;
+        if (after != null && after.length() > 0) {
+            dlog("detect[" + src + "]: matched " + match.trigger + " but there is text after the caret ('"
+                    + tail(after, 10) + "'), ignored");
+            return;
+        }
 
         start(ei, snap, text, match);
     }
@@ -215,7 +280,8 @@ final class ImeSession implements BridgeClient.Listener {
             if (clip != null) b.putString(BridgeProtocol.K_CLIP, clip);
         }
 
-        Log.i(TAG, "trigger " + match.trigger + " -> request " + currentId);
+        dlog("MATCH " + match.trigger + " id=" + currentId + " textLen=" + text.length()
+                + " tail='" + tail(text, 16) + "' needsClip=" + match.needsClip);
         gotReply = false;
         bridge.setHoldOpen(true);
         armWatchdog();
@@ -234,7 +300,9 @@ final class ImeSession implements BridgeClient.Listener {
         InputConnection ic = ims.getCurrentInputConnection();
         if (ic == null) return;
         String spin = clean + " " + SPINNER[0];
-        if (replaceBeforeCursor(ic, expectedCurrent, spin)) {
+        boolean spun = replaceBeforeCursor(ic, expectedCurrent, spin);
+        dlog("STARTED id=" + id + " spinnerShown=" + spun);
+        if (spun) {
             expectedCurrent = spin;
             spinnerOn = true;
             spinnerFrame = 0;
@@ -263,6 +331,9 @@ final class ImeSession implements BridgeClient.Listener {
             }
         }
 
+        dlog("RESULT id=" + currentId + " hasWrite=" + (write != null) + " hasRestore=" + (restore != null)
+                + " wrote=" + wrote + " toast='" + tail(r.getString(BridgeProtocol.K_TOAST_OK) != null
+                ? r.getString(BridgeProtocol.K_TOAST_OK) : r.getString(BridgeProtocol.K_TOAST_FAIL), 60) + "'");
         if (wrote) {
             String clip = r.getString(BridgeProtocol.K_SET_CLIP);
             if (clip != null) writeClipboard(clip);
@@ -284,6 +355,7 @@ final class ImeSession implements BridgeClient.Listener {
 
     @Override public void onLost() {
         if (!busy) return;
+        dlog("LOST: app unreachable for request " + currentId + " (gotReply=" + gotReply + ")");
         stopSpinner();
         cancelWatchdog();
         cancelReplyWatch();
@@ -317,7 +389,11 @@ final class ImeSession implements BridgeClient.Listener {
         try {
             ic.finishComposingText();
             CharSequence cur = ic.getTextBeforeCursor(expected.length() + 1, 0);
-            if (cur == null || !cur.toString().endsWith(expected)) return false;
+            if (cur == null || !cur.toString().endsWith(expected)) {
+                dlog("replace refused: field tail='" + tail(cur, 16) + "' but expected tail='"
+                        + tail(expected, 16) + "' (expectedLen=" + expected.length() + ")");
+                return false;
+            }
             ic.beginBatchEdit();
             try {
                 boolean deleted = ic.deleteSurroundingText(expected.length(), 0);
@@ -326,7 +402,10 @@ final class ImeSession implements BridgeClient.Listener {
                     ic.commitText(expected, 1); // never leave the user's text deleted
                     return false;
                 }
-                if (!deleted) return false;
+                if (!deleted) {
+                    dlog("replace failed: deleteSurroundingText returned false");
+                    return false;
+                }
             } finally {
                 ic.endBatchEdit();
             }
@@ -387,6 +466,7 @@ final class ImeSession implements BridgeClient.Listener {
         cancelWatchdog();
         watchdog = () -> {
             if (!busy) return;
+            dlog("WATCHDOG: request " + currentId + " got no result within " + WATCHDOG_MS + " ms");
             Bundle cancel = new Bundle();
             cancel.putString(BridgeProtocol.K_TOKEN, snapshot != null ? snapshot.token : "");
             cancel.putLong(BridgeProtocol.K_ID, currentId);
@@ -409,6 +489,7 @@ final class ImeSession implements BridgeClient.Listener {
             replyWatch = null;
             if (!busy || gotReply) return;
             Log.w(TAG, "no reply from the app for request " + currentId);
+            dlog("NO REPLY from the app within " + REPLY_TIMEOUT_MS + " ms for request " + currentId);
             Bundle cancel = new Bundle();
             cancel.putString(BridgeProtocol.K_TOKEN, snapshot != null ? snapshot.token : "");
             cancel.putLong(BridgeProtocol.K_ID, currentId);

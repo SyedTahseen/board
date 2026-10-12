@@ -1,5 +1,8 @@
 package com.musheer360.swiftslate.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.SharedPreferences
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +29,8 @@ import com.musheer360.swiftslate.R
 import com.musheer360.swiftslate.api.ApiClientUtils
 import com.musheer360.swiftslate.api.GeminiClient
 import com.musheer360.swiftslate.api.OpenAICompatibleClient
+import com.musheer360.swiftslate.bridge.ModuleBridge
+import com.musheer360.swiftslate.service.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -86,6 +91,7 @@ fun SettingsScreen(commandManager: CommandManager, prefs: SharedPreferences, key
 
     var triggerPrefix by remember { mutableStateOf(commandManager.getTriggerPrefix()) }
     var prefixError by remember { mutableStateOf<String?>(null) }
+    var debugOn by remember { mutableStateOf(prefs.getBoolean(PrefKeys.DEBUG_LOG, false)) }
     var temperature by remember { mutableStateOf(prefs.getFloat(PrefKeys.TEMPERATURE, 0.5f)) }
 
     val prefixErrorLength = stringResource(R.string.settings_prefix_error_length)
@@ -659,6 +665,51 @@ fun SettingsScreen(commandManager: CommandManager, prefs: SharedPreferences, key
                     fontSize = rhythm.bodySize,
                     modifier = Modifier.padding(top = rhythm.formGap)
                 )
+            }
+            // Debug log: switch it on, reproduce the problem, press Copy and send the text.
+            Spacer(modifier = Modifier.height(rhythm.formGap))
+            val debugCopiedMsg = stringResource(R.string.debug_log_copied)
+            val debugEmptyMsg = stringResource(R.string.debug_log_empty)
+            val debugClearedMsg = stringResource(R.string.debug_log_cleared)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Switch(
+                    checked = debugOn,
+                    onCheckedChange = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        debugOn = it
+                        prefs.edit().putBoolean(PrefKeys.DEBUG_LOG, it).apply()
+                        // The keyboard reads this flag from the trigger snapshot.
+                        ModuleBridge.publishSnapshot()
+                    }
+                )
+                Text(
+                    text = stringResource(R.string.debug_log_label),
+                    fontSize = rhythm.bodySize,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f).padding(start = 12.dp)
+                )
+                TextButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val log = DebugLog.read(context)
+                    if (log.isBlank()) {
+                        backupMessage = debugEmptyMsg
+                        backupSuccess = false
+                    } else {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("SwiftSlate debug log", log))
+                        backupMessage = debugCopiedMsg
+                        backupSuccess = true
+                    }
+                }) { Text(stringResource(R.string.debug_log_copy)) }
+                TextButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    DebugLog.clear(context)
+                    backupMessage = debugClearedMsg
+                    backupSuccess = true
+                }) { Text(stringResource(R.string.debug_log_clear)) }
             }
         }
 

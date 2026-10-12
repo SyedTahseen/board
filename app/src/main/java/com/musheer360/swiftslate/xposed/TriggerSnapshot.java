@@ -24,13 +24,18 @@ public final class TriggerSnapshot {
     }
 
     public final String token;
+    public final String prefix;
+    /** The app's "Debug log" switch; the hook only sends log lines while this is true. */
+    public final boolean debug;
     private final String translatePrefix;
     private final String[] triggers;
     private final boolean[] needsClip;
     private final Set<Character> lastChars = new HashSet<>();
 
-    private TriggerSnapshot(String token, String prefix, String[] triggers, boolean[] needsClip) {
+    private TriggerSnapshot(String token, String prefix, String[] triggers, boolean[] needsClip, boolean debug) {
         this.token = token;
+        this.prefix = prefix;
+        this.debug = debug;
         this.translatePrefix = prefix + "translate:";
         this.triggers = triggers;
         this.needsClip = needsClip;
@@ -68,7 +73,7 @@ public final class TriggerSnapshot {
             boolean[] c2 = new boolean[n];
             System.arraycopy(triggers, 0, t2, 0, n);
             System.arraycopy(clip, 0, c2, 0, n);
-            return new TriggerSnapshot(token, prefix, t2, c2);
+            return new TriggerSnapshot(token, prefix, t2, c2, root.optBoolean("debug", false));
         } catch (Exception e) {
             return null;
         }

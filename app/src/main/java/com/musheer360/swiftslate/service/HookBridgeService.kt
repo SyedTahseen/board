@@ -96,14 +96,18 @@ class HookBridgeService : Service() {
         val data = msg.data ?: return
         if (!authorized(data)) {
             Log.w(TAG, "rejected bridge message ${msg.what} from uid ${msg.sendingUid}")
+            dlog("REJECTED message ${msg.what} from uid ${msg.sendingUid}: token mismatch " +
+                "(keyboard has an old snapshot; open SwiftSlate once, then restart the keyboard)")
             return
         }
         val key = "${msg.sendingUid}:${data.getInt(BridgeProtocol.K_PID)}:${data.getLong(BridgeProtocol.K_ID)}"
         when (msg.what) {
+            BridgeProtocol.MSG_LOG -> DebugLog.log(applicationContext, "kb", data.getString(BridgeProtocol.K_TEXT) ?: "")
             BridgeProtocol.MSG_HELLO -> recordHeartbeat(data.getString(BridgeProtocol.K_PKG))
             BridgeProtocol.MSG_RUN -> run(msg.replyTo ?: return, data, key)
             BridgeProtocol.MSG_APPLIED -> commit(key, data.getBoolean(BridgeProtocol.K_OK))
             BridgeProtocol.MSG_CANCEL -> {
+                dlog("CANCEL id=${data.getLong(BridgeProtocol.K_ID)} (job running=${jobs.containsKey(key)})")
                 jobs.remove(key)?.cancel()
                 pending.remove(key)
             }
@@ -123,7 +127,10 @@ class HookBridgeService : Service() {
             .apply()
     }
 
+    private fun dlog(message: String) = DebugLog.log(applicationContext, "app", message)
+
     private fun commit(key: String, ok: Boolean) {
+        dlog("APPLIED key=$key ok=$ok (pending commit=${pending.containsKey(key)})")
         val c = pending.remove(key) ?: return
         if (!ok) return
         if (c.setUndo) {
@@ -139,11 +146,13 @@ class HookBridgeService : Service() {
         val text = data.getString(BridgeProtocol.K_TEXT) ?: return
         val fieldKey = data.getString(BridgeProtocol.K_FIELD_KEY) ?: ""
         val clip = data.getString(BridgeProtocol.K_CLIP)
+        dlog("RUN id=$id textLen=${text.length} tail='${DebugLog.tail(text)}'")
         jobs.remove(key)?.cancel()
         jobs[key] = scope.launch {
             val plan = try {
                 withTimeout(REQUEST_TIMEOUT_MS) { buildPlan(replyTo, id, key, text, fieldKey, clip) }
             } catch (e: TimeoutCancellationException) {
+                dlog("TIMEOUT id=$id after ${REQUEST_TIMEOUT_MS} ms")
                 Plan(
                     write = spinning[key],
                     toastOk = getString(R.string.toast_request_timed_out),
@@ -157,6 +166,7 @@ class HookBridgeService : Service() {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "command failed", e)
+                dlog("EXCEPTION id=$id ${e.javaClass.simpleName}: ${DebugLog.esc(e.message?.take(200))}")
                 val msg = getString(ErrorMessages.map(e.message ?: "Unknown error"))
                 Plan(
                     write = spinning[key],
@@ -167,6 +177,8 @@ class HookBridgeService : Service() {
             }
             jobs.remove(key)
             spinning.remove(key)
+            dlog("REPLY id=$id write=${plan.write != null} restore=${plan.restore != null} " +
+                "toast='${DebugLog.esc(plan.toastOk?.take(80))}' haptic=${plan.haptic}")
             send(replyTo, BridgeProtocol.MSG_RESULT, Bundle().apply {
                 putLong(BridgeProtocol.K_ID, id)
                 plan.write?.let { putString(BridgeProtocol.K_WRITE, it) }
@@ -209,6 +221,7 @@ class HookBridgeService : Service() {
                     haptic = BridgeProtocol.HAPTIC_REJECT
                 )
             }
+        dlog("COMMAND ${command.trigger} (${command.type}, builtIn=${command.isBuiltIn})")
         val precedingText = text.substring(0, text.length - command.trigger.length)
         val cleanText = precedingText.trim()
         val trigger = command.trigger

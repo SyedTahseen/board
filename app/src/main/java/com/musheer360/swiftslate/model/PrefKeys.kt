@@ -28,6 +28,9 @@ object PrefKeys {
     /** Sampling temperature (Float). */
     const val TEMPERATURE = "temperature"
 
+    /** Debug log switch (Boolean): records what the keyboard hook and the bridge see. */
+    const val DEBUG_LOG = "debug_log"
+
     /** Epoch millis when structured output was last disabled (0 = never). */
     const val STRUCTURED_OUTPUT_DISABLED_AT = "structured_output_disabled_at"
 }

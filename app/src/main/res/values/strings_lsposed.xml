@@ -9,4 +9,10 @@
     <string name="module_hint_awaiting">LSPosed sees SwiftSlate, but no keyboard has loaded it yet. In LSPosed, add your keyboard to SwiftSlate\'s scope, then force-stop the keyboard (or reboot).</string>
     <string name="module_hint_inactive">Enable the SwiftSlate module in LSPosed, add your keyboard to its scope, then restart the keyboard. The accessibility service is no longer needed.</string>
     <string name="toast_command_unknown">SwiftSlate: that command was just changed. Please try again.</string>
+    <string name="debug_log_label">Debug log</string>
+    <string name="debug_log_copy">Copy</string>
+    <string name="debug_log_clear">Clear</string>
+    <string name="debug_log_copied">Debug log copied. It holds the last few characters typed around each command, so clear it after sharing.</string>
+    <string name="debug_log_empty">Debug log is empty. Switch it on, try a command, then copy it.</string>
+    <string name="debug_log_cleared">Debug log cleared.</string>
 </resources>

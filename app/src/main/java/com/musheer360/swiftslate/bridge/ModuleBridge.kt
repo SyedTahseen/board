@@ -102,6 +102,7 @@ object ModuleBridge {
             .put("token", token(context))
             .put("prefix", manager.getTriggerPrefix())
             .put("triggers", arr)
+            .put("debug", com.musheer360.swiftslate.service.DebugLog.enabled(context))
             .toString()
     }
 

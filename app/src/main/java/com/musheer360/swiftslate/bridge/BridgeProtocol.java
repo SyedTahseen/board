@@ -23,6 +23,7 @@ public final class BridgeProtocol {
     public static final int MSG_RUN = 2;      // a trigger was typed
     public static final int MSG_APPLIED = 3;  // result was written to the field (or not)
     public static final int MSG_CANCEL = 4;   // keyboard gave up on a request
+    public static final int MSG_LOG = 5;      // debug line for the in-app log (K_TEXT)
 
     // app -> keyboard
     public static final int MSG_STARTED = 10; // first network attempt begins: show spinner
